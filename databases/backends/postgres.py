@@ -107,11 +107,12 @@ class Record(Mapping):
             return self._row[key]
         elif isinstance(key, Column):
             idx, datatype = self._column_map_full[str(key)]
+            key = key.name
         elif isinstance(key, int):
             idx, datatype = self._column_map_int[key]
         else:
             idx, datatype = self._column_map[key]
-        raw = self._row[idx]
+        raw = self._row[key]
         try:
             processor = _result_processors[datatype]
         except KeyError:

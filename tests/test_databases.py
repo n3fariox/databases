@@ -8,6 +8,8 @@ import pytest
 import sqlalchemy
 
 from databases import Database, DatabaseURL
+from databases.backends.aiopg import AiopgBackend
+from databases.backends.postgres import PostgresBackend
 
 assert "TEST_DATABASE_URLS" in os.environ, "TEST_DATABASE_URLS is not set."
 
@@ -925,3 +927,30 @@ async def test_column_names(database_url, select_query):
             assert sorted(results[0].keys()) == ["completed", "id", "text"]
             assert results[0]["text"] == "example1"
             assert results[0]["completed"] == True
+
+
+@pytest.mark.parametrize("database_url", DATABASE_URLS)
+@async_adapter
+async def test_cte_results(database_url):
+    """
+    Test complex postgres CTEs involving RETURNING
+    """
+    async with Database(database_url) as database:
+        if not isinstance(database._backend, (PostgresBackend, AiopgBackend)):
+            pytest.skip("Returning is only valid using postgres")
+        async with database.transaction(force_rollback=True):
+            values1 = {"text": "example1", "completed": True}
+            note_cte = notes.insert().returning(notes.c.id).values(**values1).cte('note_cte')
+
+            values2 = {"title": "some_title", "published": datetime.datetime.now()}
+            articles_cte = articles.insert().returning(articles.c.id).values(**values2).cte('articles_cte')
+
+            query = sqlalchemy.select([
+                *[x.label("{}.{}".format(x.table.name, x.name)) for x in note_cte.c],
+                *articles_cte.c
+            ])
+            record = await database.fetch_one(query=query)
+            assert dict(record) is not None, "This shouldn't error if the row is correct"
+            assert record[note_cte.c.id] is not None, "Failed using column as a key"
+            assert record[0] is not None, "Failed using int as a key"
+            assert record['id'] is not None, "Failed using str as a key"
